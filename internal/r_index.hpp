@@ -16,18 +16,98 @@
 #define R_INDEX_S_H_
 
 #include <definitions.hpp>
+#include <filesystem>
 #include <rle_string.hpp>
 #include "sparse_sd_vector.hpp"
 #include "sparse_hyb_vector.hpp"
 #include "utils.hpp"
 
+//Giovanni encodes the information as follows:
+//<j, SA[j]>, where we only need SA[j]=sa_val.
+constexpr size_t bytes_per_elm = 5;
+constexpr size_t bytes_pair = bytes_per_elm*2;
+constexpr std::size_t BUFFER_SIZE = 8 * 1024 * 1024; // 8 MB buffer
+constexpr std::streamsize floor_buff = (BUFFER_SIZE/bytes_pair)*bytes_pair;//floor
+
+inline string decode_bwt(std::string& bwt_file) {
+
+	size_t n = std::filesystem::file_size(bwt_file);
+	string bwt;
+	bwt.reserve(n);
+	std::ifstream ifs_bwt(bwt_file, std::ios::binary);
+
+	std::vector<char> buffer(BUFFER_SIZE);
+	while(n>0) {
+		ifs_bwt.read(buffer.data(), BUFFER_SIZE);
+		std::streamsize bytes_read = ifs_bwt.gcount();
+
+		for (size_t i = 0; i < bytes_read; i++) {
+			if (buffer[i]==0) {
+				buffer[i]= 1;//some sort of problem with 0. Nicola uses TERMINATOR=1 instead
+			}
+			bwt.push_back(buffer[i]);
+		}
+		n-= bytes_read;
+	}
+	ifs_bwt.close();
+	return bwt;
+}
+
+inline std::vector<std::pair<ulint, ulint>> decode_sa_first(std::string& ssa, size_t n) {
+
+	vector<pair<ulint, ulint>> samples_first; 	//text positions corresponding to first characters in BWT runs, and their ranks 0...R-1
+	std::ifstream ifs_sa_first(ssa, std::ios::binary);
+	size_t fsize = std::filesystem::file_size(ssa);
+	assert(fsize % bytes_per_elm == 0);
+
+	std::vector<char> buffer(floor_buff);
+	while(fsize>0) {
+		ifs_sa_first.read(buffer.data(), floor_buff);
+		std::streamsize bytes_read = ifs_sa_first.gcount();
+
+		for (size_t i = bytes_per_elm; i < bytes_read; i+=bytes_pair) {
+			uint64_t sa_val = 0; //clean the values, just in case
+			memcpy(&sa_val, buffer.data() + i, bytes_per_elm);//skipping j as we only need SA[j]
+			assert(sa_val<n);
+			samples_first.emplace_back(sa_val>0?sa_val-1:n-1, samples_first.size());
+		}
+		fsize -= bytes_read;
+	}
+	ifs_sa_first.close();
+	return samples_first;
+}
+
+inline std::vector<ulint> decode_sa_last(std::string& esa, size_t n) {
+
+	vector<ulint> samples_last; //text positions corresponding to first characters in BWT runs, and their ranks 0...R-1
+	std::ifstream ifs_sa_last(esa, std::ios::binary);
+	size_t fsize = std::filesystem::file_size(esa);
+	assert(fsize % bytes_per_elm == 0);//assuming the elements are stored in 5 bytes each
+
+	std::vector<char> buffer(floor_buff);
+
+	while(fsize>0) {
+		ifs_sa_last.read(buffer.data(), floor_buff);
+		std::streamsize bytes_read = ifs_sa_last.gcount();
+
+		for (size_t i = bytes_per_elm; i < bytes_read; i+=bytes_pair) {
+			uint64_t sa_val = 0; //clean the values, just in case
+			memcpy(&sa_val, buffer.data() + i, 5);//skipping j
+			assert(sa_val<n);
+			samples_last.push_back(sa_val>0?sa_val-1:n-1);
+		}
+		fsize -= bytes_read;
+	}
+	ifs_sa_last.close();
+	return samples_last;
+}
+
 using namespace sdsl;
 
 namespace ri{
 
-template	<	class sparse_bv_type = sparse_sd_vector,
-				class rle_string_t = rle_string_sd
-			>
+template<class sparse_bv_type = sparse_sd_vector,
+	     class rle_string_t = rle_string_sd>
 class r_index{
 
 public:
@@ -35,11 +115,95 @@ public:
 	using triple = std::tuple<range_t, ulint, ulint>;
 
 	r_index(){}
+	explicit r_index(string &bigbwt_prefix) {
+
+		string bwt_file = bigbwt_prefix + ".bwt";
+		string ssa_file = bigbwt_prefix + ".ssa";
+		string esa_file = bigbwt_prefix + ".esa";
+		assert(filesystem::exists(bwt_file));
+		assert(filesystem::exists(ssa_file));
+		assert(filesystem::exists(esa_file));
+		size_t n=0;
+
+		{
+			cout << "(1/2) RLE encoding BWT ... " << flush;
+			string bwt_s = decode_bwt(bwt_file);
+			n = bwt_s.size();
+			bwt = rle_string_t(bwt_s);
+			//build F column
+			F = vector<ulint>(256,0);
+			for(uchar c : bwt_s)
+				F[c]++;
+
+			for(ulint i=255;i>0;--i)
+				F[i] = F[i-1];
+
+			F[0] = 0;
+
+			for(ulint i=1;i<256;++i)
+				F[i] += F[i-1];
+
+			for(ulint i=0;i<bwt_s.size();++i)
+				if(bwt_s[i]==TERMINATOR)
+					terminator_position = i;
+			cout << "done. " << endl<<endl;
+			r = bwt.number_of_runs();
+		}
+
+		std::cout<<"Deconding heads"<<std::endl;
+		vector<pair<ulint,ulint>> samples_first_vec = decode_sa_first(ssa_file, n);
+		std::cout<<"Decoding tails"<<std::endl;
+		vector<ulint> samples_last_vec = decode_sa_last(esa_file, n);
+		assert(samples_first_vec.size() == r);
+		assert(samples_last_vec.size() == r);
+
+		int log_r = bitsize(uint64_t(r));
+		int log_n = bitsize(uint64_t(bwt.size()));
+
+		cout << "Number of BWT equal-letter runs: r = " << r << endl;
+		cout << "Rate n/r = " << double(bwt.size())/r << endl;
+		cout << "log2(r) = " << log2(double(r)) << endl;
+		cout << "log2(n/r) = " << log2(double(bwt.size())/r) << endl << endl;
+
+		cout << "(2/2) Building phi function ..." << flush;
+
+		//sort samples of first positions in runs according to text position
+		std::sort(samples_first_vec.begin(), samples_first_vec.end());
+		//build Elias-Fano predecessor
+		{
+			auto pred_bv = vector<bool>(n,false);
+			for(auto p : samples_first_vec){
+				assert(p.first < pred_bv.size());
+				pred_bv[p.first] = true;
+			}
+
+			pred = sparse_bv_type(pred_bv);
+		}
+
+		assert(pred.rank(pred.size()) == r);
+
+		//last text position must be sampled
+		assert(pred[pred.size()-1]);
+
+		samples_last = int_vector<>(r,0,log_n); //text positions corresponding to last characters in BWT runs, in BWT order
+		pred_to_run = int_vector<>(r,0,log_r); //stores the BWT run (0...R-1) corresponding to each position in pred, in text order
+
+		for(ulint i=0;i<samples_last_vec.size();++i){
+			assert(bitsize(uint64_t(samples_last_vec[i])) <= log_n);
+			samples_last[i] = samples_last_vec[i];
+		}
+
+		for(ulint i=0;i<samples_first_vec.size();++i){
+			assert(bitsize(uint64_t(samples_first_vec[i].second)) <= log_r);
+			pred_to_run[i] = samples_first_vec[i].second;
+		}
+		cout << " done. " << endl<<endl;
+	}
 
 	/*
 	 * Build index
 	 */
-	r_index(string &input, bool sais = true){
+	r_index(string &input, bool sais){
 
 		this->sais = sais;
 
@@ -289,7 +453,7 @@ public:
 	/*
 	 * Return BWT range of pattern P
 	 */
-	range_t count(string &P){
+	range_t count(const string &P){
 
 		auto range = full_range();
 		ulint m = P.size();
@@ -325,7 +489,7 @@ public:
 	 * locate all occurrences of P and return them in an array
 	 * (space consuming if result is big).
 	 */
-	vector<ulint> locate_all(string& P){
+	vector<ulint> locate_all(const string& P){
 
 		vector<ulint> OCC;
 
@@ -460,15 +624,10 @@ public:
 	}
 
 	ulint print_space(){
-
 		cout << "Number of runs = " << bwt.number_of_runs() << endl<<endl;
-
 		ulint tot_bytes = bwt.print_space();
-
 		cout << "\nTOT BWT space: " << tot_bytes << " Bytes" <<endl<<endl;
-
 		return tot_bytes;
-
 	}
 
 private:
@@ -479,7 +638,7 @@ private:
 	 * returns <range, j,k>
 	 *
 	 */
-	pair<range_t, ulint> count_and_get_occ(string &P){
+	pair<range_t, ulint> count_and_get_occ(const string &P){
 
 		//k = SA[r]
 		ulint k = 0;

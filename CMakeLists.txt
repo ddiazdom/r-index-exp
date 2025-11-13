@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 2.6)
+cmake_minimum_required(VERSION 3.5)
 
 # Set a default build type if none was specified
 if(NOT CMAKE_BUILD_TYPE)
@@ -8,7 +8,7 @@ endif()
 
 #set( CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/.. )
 
-project (s-rlbwt)
+project (r-index-fork)
 
 include_directories(${PROJECT_SOURCE_DIR})
 include_directories(${PROJECT_SOURCE_DIR}/internal)
@@ -18,7 +18,7 @@ LINK_DIRECTORIES(~/lib) #SDSL lib are here
 
 message("Building in ${CMAKE_BUILD_TYPE} mode")
 
-set(CMAKE_CXX_FLAGS "--std=c++11")
+set(CMAKE_CXX_FLAGS "--std=c++17")
 
 set(CMAKE_CXX_FLAGS_DEBUG "-O0 -ggdb -g")
 set(CMAKE_CXX_FLAGS_RELEASE "-g -ggdb -Ofast -fstrict-aliasing -DNDEBUG -march=native")
@@ -38,6 +38,11 @@ add_executable(ri-count ri-count.cpp)
 TARGET_LINK_LIBRARIES(ri-count sdsl)
 TARGET_LINK_LIBRARIES(ri-count divsufsort)
 TARGET_LINK_LIBRARIES(ri-count divsufsort64)
+
+add_executable(ri-cli ri-cli.cpp)
+TARGET_LINK_LIBRARIES(ri-cli sdsl)
+TARGET_LINK_LIBRARIES(ri-cli divsufsort)
+TARGET_LINK_LIBRARIES(ri-cli divsufsort64)
 
 #add_executable(ri-space ri-space.cpp)
 #TARGET_LINK_LIBRARIES(ri-space sdsl)
