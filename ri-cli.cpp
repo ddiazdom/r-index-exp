@@ -129,7 +129,7 @@ void test_count(std::string input_file, std::string& pat_file){
     size_t acc_count=0;
     for(auto const& p : pat_list) {
         MEASURE(index.count(p), acc_time, ans, std::chrono::nanoseconds)
-        acc_count+=ans.second-ans.first;
+        acc_count+=ans.second-ans.first+1;
     }
 
     //std::cout<<std::fixed<<std::setprecision(3);
