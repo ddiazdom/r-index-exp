@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.5)
+cmake_minimum_required(VERSION 3.10)
 
 # Set a default build type if none was specified
 if(NOT CMAKE_BUILD_TYPE)
@@ -21,7 +21,8 @@ message("Building in ${CMAKE_BUILD_TYPE} mode")
 set(CMAKE_CXX_FLAGS "--std=c++17")
 
 set(CMAKE_CXX_FLAGS_DEBUG "-O0 -ggdb -g")
-set(CMAKE_CXX_FLAGS_RELEASE "-g -ggdb -Ofast -fstrict-aliasing -DNDEBUG -march=native")
+#set(CMAKE_CXX_FLAGS_RELEASE "-g -ggdb -Ofast -fstrict-aliasing -DNDEBUG -march=native")
+set(CMAKE_CXX_FLAGS_RELEASE "-Wall -pedantic -O3 -ffast-math -g")
 set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-g -ggdb -Ofast -fstrict-aliasing -march=native")
 
 add_executable(ri-build ri-build.cpp)

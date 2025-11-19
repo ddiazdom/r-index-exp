@@ -29,7 +29,7 @@ std::vector<std::string> file2pat_list(std::string& pat_file, ulint &n_pats, uli
     std::getline(ifs, header);
     n_pats = get_number_of_patterns(header);
     pat_len = get_patterns_length(header);
-    std::cout<<"Searching for "<<n_pats<<" patterns of length "<<pat_len<<" each "<<std::endl;
+    //std::cout<<"Searching for "<<n_pats<<" patterns of length "<<pat_len<<" each "<<std::endl;
     std::vector<std::string> pat_list(n_pats);
     for(ulint i=0;i<n_pats;++i){
         pat_list[i].reserve(pat_len);
@@ -118,6 +118,9 @@ void test_count(std::string input_file, std::string& pat_file){
     index_type index;
     index.load(in);
 
+    const double bps = double(std::filesystem::file_size(input_file)*8)/double(index.bwt_size());
+    const std::string file = std::filesystem::path(input_file).filename();
+
     uint64_t n_pats, pat_len;
     std::vector<std::string> pat_list = file2pat_list(pat_file, n_pats, pat_len);
 
@@ -129,10 +132,17 @@ void test_count(std::string input_file, std::string& pat_file){
         acc_count+=ans.second-ans.first;
     }
 
+    //std::cout<<std::fixed<<std::setprecision(3);
+    //std::cout<<"\tTotal number of occurrences "<<acc_count<<std::endl;
+    //std::cout<<"\t"<<double(acc_time)/double(n_pats)<<" nanosecs/pat"<<std::endl;
+    //std::cout<<"\t"<<double(acc_time)/double(acc_count)<<" nanosecs/occ"<<std::endl;
+
+    const double ns_per_pat = double(acc_time)/double(n_pats);
+    const double ns_per_occ = double(acc_time)/double(acc_count);
+
     std::cout<<std::fixed<<std::setprecision(3);
-    std::cout<<"\tTotal number of occurrences "<<acc_count<<std::endl;
-    std::cout<<"\t"<<double(acc_time)/double(n_pats)<<" nanosecs/pat"<<std::endl;
-    std::cout<<"\t"<<double(acc_time)/double(acc_count)<<" nanosecs/occ"<<std::endl;
+    std::cout<<"#file\tindex_type\tbits_per_sym\tn_pats\tpat_len\tn_occ\tnanosecs/pat\tnanosecs/occ"<<std::endl;
+    std::cout<<file<<"\t"<<"r_index"<<"\t"<<bps<<"\t"<<n_pats<<"\t"<<pat_len<<"\t"<<acc_count<<"\t"<<ns_per_pat<<"\t"<<ns_per_occ<<std::endl;
 }
 
 template<class index_type>
@@ -145,27 +155,37 @@ void test_locate(std::string input_file, std::string& pat_file){
     index_type index;
     index.load(in);
 
+    const double bps = double(std::filesystem::file_size(input_file)*8)/double(index.bwt_size());
+    const std::string file = std::filesystem::path(input_file).filename();
+
     uint64_t n_pats, pat_len;
     std::vector<std::string> pat_list = file2pat_list(pat_file, n_pats, pat_len);
 
     size_t acc_time=0;
     size_t acc_count=0;
     for(auto const& p : pat_list) {
-        std::vector<size_t> occ;
-        MEASURE(index.locate_all(p), acc_time, occ, std::chrono::microseconds)
+        std::vector<ulint> occ;
+        MEASURE(index.locate_all(p), acc_time, occ, std::chrono::nanoseconds)
         acc_count+=occ.size();
     }
 
+    //std::cout<<std::fixed<<std::setprecision(3);
+    //std::cout<<"\tTotal number of occurrences "<<acc_count<<std::endl;
+    //std::cout<<"\t"<<double(acc_time)/double(n_pats)<<" microsecs/pat"<<std::endl;
+    //std::cout<<"\t"<<double(acc_time)/double(acc_count)<<" microsecs/occ"<<std::endl;
+
+    const double ns_per_pat = double(acc_time)/double(n_pats);
+    const double ns_per_occ = double(acc_time)/double(acc_count);
+
     std::cout<<std::fixed<<std::setprecision(3);
-    std::cout<<"\tTotal number of occurrences "<<acc_count<<std::endl;
-    std::cout<<"\t"<<double(acc_time)/double(n_pats)<<" microsecs/pat"<<std::endl;
-    std::cout<<"\t"<<double(acc_time)/double(acc_count)<<" microsecs/occ"<<std::endl;
+    std::cout<<"#file\tindex_type\tbits_per_sym\tn_pats\tpat_len\tn_occ\tnanosecs/pat\tnanosecs/occ"<<std::endl;
+    std::cout<<file<<"\t"<<"r_index"<<"\t"<<bps<<"\t"<<n_pats<<"\t"<<pat_len<<"\t"<<acc_count<<"\t"<<ns_per_pat<<"\t"<<ns_per_occ<<std::endl;
 }
 
 int main(int argc, char** argv) {
 
     arguments args;
-    CLI::App app("Subsample r-index");
+    CLI::App app("R-index");
     parse_app(app, args);
 
     CLI11_PARSE(app, argc, argv);
@@ -177,7 +197,7 @@ int main(int argc, char** argv) {
 
         std::cout<<"Building the r-index from the precomputed BWT/SA elements in "<<args.bigbwt_pref<<std::endl;
         auto idx = ri::r_index(args.bigbwt_pref);
-        bool fast = false;//a parameter of the r-index, seems to be unused
+        bool fast = false;//a parameter of the r-index, seems unused
         std::ofstream ofs(args.output_file);
         ofs.write((char*)&fast,sizeof(fast));
 
